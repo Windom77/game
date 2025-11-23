@@ -250,13 +250,13 @@ class Scene3D:
                 char_node = self._load_model_with_trimesh(model_path)
 
                 if char_node:
+                    # FIX: Rotate to stand upright BEFORE attaching to scene
+                    char_node.setP(-90)  # Pitch -90 to stand vertical
+
                     char_node.reparentTo(self.base.render)
 
                     # Position character
                     char_node.setPos(pos[0], pos[1], 0)
-
-                    # FIX 1: Rotate to stand upright (models are lying down)
-                    char_node.setHpr(0, -90, 0)  # Pitch -90 to stand up
 
                     # Scale larger for visibility
                     char_node.setScale(2.5)
