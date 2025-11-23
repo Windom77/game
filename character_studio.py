@@ -370,6 +370,34 @@ class EmbeddedViewer(ShowBase):
             self.parent_frame.bind('<Button-4>', self._on_scroll_up)
             self.parent_frame.bind('<Button-5>', self._on_scroll_down)
 
+            # Keyboard bindings for camera control
+            # Make frame focusable and bind keys
+            self.parent_frame.config(takefocus=True)
+            self.parent_frame.bind('<Enter>', lambda e: self.parent_frame.focus_set())
+
+            # Arrow keys for rotation/tilt
+            self.parent_frame.bind('<Left>', lambda e: self._rotate_left())
+            self.parent_frame.bind('<Right>', lambda e: self._rotate_right())
+            self.parent_frame.bind('<Up>', lambda e: self._tilt_up())
+            self.parent_frame.bind('<Down>', lambda e: self._tilt_down())
+
+            # Zoom with +/- keys
+            self.parent_frame.bind('<plus>', lambda e: self._zoom_in())
+            self.parent_frame.bind('<equal>', lambda e: self._zoom_in())  # + without shift
+            self.parent_frame.bind('<minus>', lambda e: self._zoom_out())
+
+            # View presets
+            self.parent_frame.bind('<r>', lambda e: self.reset_view())
+            self.parent_frame.bind('<R>', lambda e: self.reset_view())
+            self.parent_frame.bind('<f>', lambda e: self._focus_face())
+            self.parent_frame.bind('<F>', lambda e: self._focus_face())
+            self.parent_frame.bind('<b>', lambda e: self._focus_body())
+            self.parent_frame.bind('<B>', lambda e: self._focus_body())
+            self.parent_frame.bind('<Home>', lambda e: self.reset_view())
+
+            # Turntable toggle
+            self.parent_frame.bind('<space>', lambda e: self.toggle_turntable())
+
             # Update task
             self.taskMgr.add(self._update_task, 'viewer_update')
 
@@ -707,6 +735,61 @@ class EmbeddedViewer(ShowBase):
         self.screenshot(filepath, defaultFilename=False)
         return filepath
 
+    # === Keyboard Camera Controls ===
+
+    def _rotate_left(self):
+        """Rotate camera left."""
+        self.orbit_cam.rotate(-10, 0)
+        return "Rotated left"
+
+    def _rotate_right(self):
+        """Rotate camera right."""
+        self.orbit_cam.rotate(10, 0)
+        return "Rotated right"
+
+    def _tilt_up(self):
+        """Tilt camera up (look down at model)."""
+        self.orbit_cam.rotate(0, -5)
+        return "Tilted up"
+
+    def _tilt_down(self):
+        """Tilt camera down (look up at model)."""
+        self.orbit_cam.rotate(0, 5)
+        return "Tilted down"
+
+    def _zoom_in(self):
+        """Zoom camera in."""
+        self.orbit_cam.zoom(2)
+        return "Zoomed in"
+
+    def _zoom_out(self):
+        """Zoom camera out."""
+        self.orbit_cam.zoom(-2)
+        return "Zoomed out"
+
+    def _focus_face(self):
+        """Focus camera on face area."""
+        if self.model_np:
+            bounds = self.model_np.getTightBounds()
+            if bounds:
+                # Target upper portion of model (face area)
+                center = (bounds[0] + bounds[1]) * 0.5
+                height = bounds[1].z - bounds[0].z
+                self.orbit_cam.target = Point3(center.x, center.y, center.z + height * 0.3)
+                self.orbit_cam.distance = height * 0.8
+                self.orbit_cam.pitch = -10
+                self.orbit_cam.heading = 0
+                self.orbit_cam.update_camera()
+        return "Focused on face"
+
+    def _focus_body(self):
+        """Focus camera on full body."""
+        if self.model_np:
+            bounds = self.model_np.getTightBounds()
+            if bounds:
+                self.orbit_cam.frame_model(bounds[0], bounds[1])
+        return "Full body view"
+
     # === Mouse Event Handlers ===
 
     def _on_mouse_press_left(self, event):
@@ -860,15 +943,27 @@ class CompactMaterialWidget(ttk.Frame):
 
         self.material.base_color = [r, g, b, self.material.base_color[3]]
         self._update_preview()
+        self._flash_feedback()
 
         if self.on_change:
-            self.on_change()
+            # Pass material info for better status message
+            self.on_change(self.material.display_name, r, g, b)
 
     def _on_enable_toggle(self):
         """Handle enable/disable toggle."""
         self.material.enabled = self.enabled_var.get()
         if self.on_change:
-            self.on_change()
+            status = "enabled" if self.material.enabled else "disabled"
+            self.on_change(f"{self.material.display_name} {status}", 0, 0, 0)
+
+    def _flash_feedback(self):
+        """Brief visual flash on the preview to confirm change."""
+        # Store original background
+        orig_bg = self.cget('background') if self.cget('background') else 'SystemButtonFace'
+
+        # Flash green briefly
+        self.configure(style='Active.TFrame')
+        self.after(150, lambda: self.configure(style='TFrame'))
 
     def _update_preview(self):
         """Update the color preview canvas."""
@@ -1138,11 +1233,18 @@ class CharacterStudioApp:
         ttk.Button(controls_frame, text="Screenshot",
                    command=self._take_screenshot).pack(side="left", padx=2)
 
-        # Hint text
-        hint = ttk.Label(controls_frame,
-                         text="Left drag: Rotate | Right drag: Pan | Scroll: Zoom",
-                         foreground="gray")
-        hint.pack(side="right", padx=5)
+        # Help button
+        ttk.Button(controls_frame, text="Help",
+                   command=self._show_help).pack(side="right", padx=2)
+
+        # Hint row with keyboard shortcuts
+        hint_frame = ttk.Frame(parent)
+        hint_frame.pack(fill="x", pady=(0, 5))
+
+        hint_text = "Mouse: Drag=Rotate, RightDrag=Pan, Scroll=Zoom | Keys: ←→↑↓=Rotate/Tilt, +−=Zoom, F=Face, B=Body, R=Reset"
+        hint = ttk.Label(hint_frame, text=hint_text, foreground="gray",
+                         font=("TkDefaultFont", 8))
+        hint.pack(side="left", padx=5)
 
     def _start_panda3d(self):
         """Start the Panda3D embedded viewer."""
@@ -1265,12 +1367,21 @@ class CharacterStudioApp:
         self.scrollable_frame.update_idletasks()
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def _on_material_change(self):
+    def _on_material_change(self, material_name: str = "", r: float = 0, g: float = 0, b: float = 0):
         """Called when any material is changed - update 3D preview."""
-        print("[UI] Material changed - updating preview...")
+        print(f"[UI] Material changed: {material_name} -> RGB({r:.2f}, {g:.2f}, {b:.2f})")
         self._save_undo_state()
         self._update_3d_preview()
-        self.status_label.config(text="Color updated", foreground="green")
+
+        # Show detailed status with material name and color
+        if material_name and r > 0:
+            status_text = f"✓ {material_name}: RGB({r:.2f}, {g:.2f}, {b:.2f})"
+        elif material_name:
+            status_text = f"✓ {material_name}"
+        else:
+            status_text = "✓ Color updated"
+
+        self.status_label.config(text=status_text, foreground="green")
 
     def _update_3d_preview(self):
         """Update the 3D preview with current material colors."""
@@ -1382,6 +1493,69 @@ class CharacterStudioApp:
                 self.status_label.config(
                     text=f"Screenshot: {os.path.basename(filepath)}",
                     foreground="green")
+
+    def _show_help(self):
+        """Show keyboard shortcuts help dialog."""
+        help_text = """
+╔═══════════════════════════════════════════════════╗
+║           KEYBOARD SHORTCUTS                      ║
+╠═══════════════════════════════════════════════════╣
+║  CAMERA CONTROLS (click on 3D view first)         ║
+║  ──────────────────────────────────────────────   ║
+║  ← →        Rotate camera left/right              ║
+║  ↑ ↓        Tilt camera up/down                   ║
+║  + -        Zoom in/out                           ║
+║  R          Reset view                            ║
+║  F          Focus on face                         ║
+║  B          Full body view                        ║
+║  Space      Toggle auto-rotate (turntable)        ║
+║                                                   ║
+║  MOUSE CONTROLS                                   ║
+║  ──────────────────────────────────────────────   ║
+║  Left Drag      Rotate model                      ║
+║  Right Drag     Pan camera                        ║
+║  Scroll         Zoom in/out                       ║
+║                                                   ║
+║  EDITING                                          ║
+║  ──────────────────────────────────────────────   ║
+║  Click slider   Adjust color component            ║
+║  Pick button    Open color picker                 ║
+║  Preset btns    Apply quick color presets         ║
+║  Reset button   Restore original color            ║
+║                                                   ║
+║  3D PREVIEW NOTE                                  ║
+║  ──────────────────────────────────────────────   ║
+║  The 3D preview shows a blended color from all    ║
+║  materials. The saved GLB file will have the      ║
+║  correct per-material colors you set.             ║
+╚═══════════════════════════════════════════════════╝
+"""
+        # Create help dialog
+        help_window = tk.Toplevel(self.root)
+        help_window.title("Keyboard Shortcuts - Help")
+        help_window.geometry("450x550")
+        help_window.resizable(False, False)
+
+        # Make it modal
+        help_window.transient(self.root)
+        help_window.grab_set()
+
+        # Help text in monospace font
+        text_widget = tk.Text(help_window, font=("Courier", 10), wrap="none",
+                              bg="#f0f0f0", relief="flat", padx=10, pady=10)
+        text_widget.insert("1.0", help_text.strip())
+        text_widget.config(state="disabled")
+        text_widget.pack(fill="both", expand=True, padx=10, pady=10)
+
+        # Close button
+        ttk.Button(help_window, text="Close",
+                   command=help_window.destroy).pack(pady=10)
+
+        # Center on parent
+        help_window.update_idletasks()
+        x = self.root.winfo_x() + (self.root.winfo_width() - help_window.winfo_width()) // 2
+        y = self.root.winfo_y() + (self.root.winfo_height() - help_window.winfo_height()) // 2
+        help_window.geometry(f"+{x}+{y}")
 
     # === Save Functions ===
 
