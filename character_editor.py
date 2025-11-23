@@ -446,6 +446,22 @@ class CharacterEditorApp:
             command=self._randomize_colors
         ).pack(side="left", padx=5)
 
+        # Center buttons (Preview)
+        center_buttons = ttk.Frame(buttons_frame)
+        center_buttons.pack(side="left", padx=20)
+
+        ttk.Button(
+            center_buttons,
+            text="Preview 3D",
+            command=self._preview_3d
+        ).pack(side="left", padx=5)
+
+        ttk.Button(
+            center_buttons,
+            text="Compare Original",
+            command=self._compare_original
+        ).pack(side="left", padx=5)
+
         # Right side buttons
         right_buttons = ttk.Frame(buttons_frame)
         right_buttons.pack(side="right")
@@ -635,6 +651,105 @@ class CharacterEditorApp:
 
         self._rebuild_material_widgets()
         self.status_label.config(text="Colors randomized", foreground="purple")
+
+    def _preview_3d(self):
+        """Launch 3D viewer to preview current modifications."""
+        if not self.gltf or not self.current_file:
+            messagebox.showwarning("No File", "Please load a GLB file first.")
+            return
+
+        # Create output directory
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Save temporary preview file
+        temp_path = os.path.join(self.output_dir, "_preview_temp.glb")
+
+        try:
+            # Apply current modifications to GLTF
+            gltf_copy = GLTF2().load(self.current_file)
+            for mat_info in self.materials:
+                if mat_info.enabled:
+                    gltf_mat = gltf_copy.materials[mat_info.index]
+                    if gltf_mat.pbrMetallicRoughness:
+                        gltf_mat.pbrMetallicRoughness.baseColorFactor = mat_info.base_color
+
+            # Save temp file
+            gltf_copy.save(temp_path)
+
+            # Launch viewer as subprocess
+            import subprocess
+            viewer_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "model_viewer.py"
+            )
+
+            if os.path.exists(viewer_path):
+                subprocess.Popen(
+                    ['python3', viewer_path, temp_path],
+                    start_new_session=True
+                )
+                self.status_label.config(
+                    text="3D Viewer launched",
+                    foreground="green"
+                )
+            else:
+                messagebox.showerror(
+                    "Viewer Not Found",
+                    f"model_viewer.py not found at:\n{viewer_path}"
+                )
+
+        except Exception as e:
+            messagebox.showerror("Preview Error", str(e))
+            self.status_label.config(text=f"Preview failed: {e}", foreground="red")
+
+    def _compare_original(self):
+        """Launch 3D viewer with original and modified versions for comparison."""
+        if not self.gltf or not self.current_file:
+            messagebox.showwarning("No File", "Please load a GLB file first.")
+            return
+
+        # Create output directory
+        os.makedirs(self.output_dir, exist_ok=True)
+
+        # Save temporary modified file
+        temp_path = os.path.join(self.output_dir, "_preview_temp.glb")
+
+        try:
+            # Apply current modifications
+            gltf_copy = GLTF2().load(self.current_file)
+            for mat_info in self.materials:
+                if mat_info.enabled:
+                    gltf_mat = gltf_copy.materials[mat_info.index]
+                    if gltf_mat.pbrMetallicRoughness:
+                        gltf_mat.pbrMetallicRoughness.baseColorFactor = mat_info.base_color
+
+            gltf_copy.save(temp_path)
+
+            # Launch viewer with compare mode
+            import subprocess
+            viewer_path = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                "model_viewer.py"
+            )
+
+            if os.path.exists(viewer_path):
+                subprocess.Popen(
+                    ['python3', viewer_path, temp_path, '--compare', self.current_file],
+                    start_new_session=True
+                )
+                self.status_label.config(
+                    text="Compare viewer launched (Space to toggle)",
+                    foreground="green"
+                )
+            else:
+                messagebox.showerror(
+                    "Viewer Not Found",
+                    f"model_viewer.py not found at:\n{viewer_path}"
+                )
+
+        except Exception as e:
+            messagebox.showerror("Compare Error", str(e))
+            self.status_label.config(text=f"Compare failed: {e}", foreground="red")
 
     def _save_file(self):
         """Save modified GLB with custom name."""
