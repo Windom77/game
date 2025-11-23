@@ -365,7 +365,11 @@ class EmbeddedViewer(ShowBase):
         self.grid_np.setTransparency(True)
 
     def load_model(self, filepath):
-        """Load a GLB model and return success status."""
+        """Load a GLB model and return success status.
+
+        Uses same loading approach as scene_3d.py to ensure correct geometry.
+        Key: Collect ALL meshes first, then center the combined model once.
+        """
         if not TRIMESH_AVAILABLE:
             print("Error: trimesh not available for loading")
             return False
@@ -383,17 +387,23 @@ class EmbeddedViewer(ShowBase):
         try:
             # Load with trimesh
             scene = trimesh.load(filepath)
+            print(f"Loaded with trimesh: {type(scene)}")
 
-            # Create parent node for all meshes
-            self.model_np = self.render.attachNewNode("model_root")
+            # Collect ALL meshes first (same as scene_3d.py)
+            all_vertices = []
+            all_normals = []
+            all_faces = []
+            vertex_offset = 0
 
-            # Collect meshes
+            # Get meshes from scene
             if isinstance(scene, trimesh.Scene):
-                meshes = list(scene.geometry.items())
+                meshes = list(scene.geometry.values())
+                print(f"Scene has {len(meshes)} geometry objects")
             else:
-                meshes = [("default", scene)]
+                meshes = [scene]
 
-            for mesh_name, mesh in meshes:
+            for mesh_idx, mesh in enumerate(meshes):
+                # Skip non-mesh objects
                 if not hasattr(mesh, 'vertices') or not hasattr(mesh, 'faces'):
                     continue
 
@@ -403,6 +413,11 @@ class EmbeddedViewer(ShowBase):
                 if len(verts) == 0 or len(faces) == 0:
                     continue
 
+                # Check for invalid values
+                if np.any(~np.isfinite(verts)):
+                    print(f"  Mesh {mesh_idx}: has inf/nan vertices, skipping")
+                    continue
+
                 # Get normals
                 if hasattr(mesh, 'vertex_normals') and mesh.vertex_normals is not None:
                     norms = np.array(mesh.vertex_normals)
@@ -410,47 +425,68 @@ class EmbeddedViewer(ShowBase):
                     norms = np.zeros_like(verts)
                     norms[:, 2] = 1.0
 
-                # Center vertices
-                center = verts.mean(axis=0)
-                verts = verts - center
+                # Offset faces for concatenation (critical for combined mesh)
+                offset_faces = faces + vertex_offset
 
-                # Create Panda3D geometry
-                geom_node = GeomNode(mesh_name)
-                vformat = GeomVertexFormat.getV3n3()
-                vdata = GeomVertexData('vertices', vformat, Geom.UHStatic)
-                vdata.setNumRows(len(verts))
+                all_vertices.append(verts)
+                all_normals.append(norms)
+                all_faces.append(offset_faces)
+                vertex_offset += len(verts)
 
-                vertex_writer = GeomVertexWriter(vdata, 'vertex')
-                normal_writer = GeomVertexWriter(vdata, 'normal')
+            if not all_vertices:
+                print("ERROR: No valid meshes found")
+                return False
 
-                for i, vert in enumerate(verts):
-                    # Swap Y and Z for Panda3D coordinate system
-                    vertex_writer.addData3f(float(vert[0]), float(vert[2]), float(vert[1]))
-                    n = norms[i]
-                    normal_writer.addData3f(float(n[0]), float(n[2]), float(n[1]))
+            # Concatenate all meshes into one
+            vertices = np.vstack(all_vertices)
+            normals = np.vstack(all_normals)
+            faces = np.vstack(all_faces)
 
-                tris = GeomTriangles(Geom.UHStatic)
-                for face in faces:
-                    tris.addVertices(int(face[0]), int(face[1]), int(face[2]))
-                tris.closePrimitive()
+            print(f"Combined: {len(vertices)} verts, {len(faces)} faces")
 
-                geom = Geom(vdata)
-                geom.addPrimitive(tris)
-                geom_node.addGeom(geom)
+            # Center the COMBINED model (not individual meshes!)
+            center = vertices.mean(axis=0)
+            vertices = vertices - center
 
-                mesh_np = self.model_np.attachNewNode(geom_node)
-                mesh_np.setColor(0.8, 0.8, 0.8, 1.0)
+            # Create Panda3D GeomNode
+            geom_node = GeomNode('model')
 
-                # Store reference for material updates
-                self.mesh_nodes[mesh_name] = mesh_np
+            vformat = GeomVertexFormat.getV3n3()
+            vdata = GeomVertexData('vertices', vformat, Geom.UHStatic)
+            vdata.setNumRows(len(vertices))
+
+            vertex_writer = GeomVertexWriter(vdata, 'vertex')
+            normal_writer = GeomVertexWriter(vdata, 'normal')
+
+            for i, vert in enumerate(vertices):
+                # Swap Y and Z for Panda3D (GLB Z-up -> Panda3D Y-forward)
+                vertex_writer.addData3f(float(vert[0]), float(vert[2]), float(vert[1]))
+                n = normals[i]
+                normal_writer.addData3f(float(n[0]), float(n[2]), float(n[1]))
+
+            # Create triangles
+            tris = GeomTriangles(Geom.UHStatic)
+            for face in faces:
+                tris.addVertices(int(face[0]), int(face[1]), int(face[2]))
+            tris.closePrimitive()
+
+            geom = Geom(vdata)
+            geom.addPrimitive(tris)
+            geom_node.addGeom(geom)
+
+            # Create node path and attach to render
+            self.model_np = self.render.attachNewNode(geom_node)
+            self.model_np.setColor(0.8, 0.8, 0.8, 1.0)
+
+            # Store reference for material updates
+            self.mesh_nodes['combined'] = self.model_np
 
             # Frame camera to model
-            if self.model_np:
-                bounds = self.model_np.getTightBounds()
-                if bounds:
-                    self.orbit_cam.frame_model(bounds[0], bounds[1])
+            bounds = self.model_np.getTightBounds()
+            if bounds:
+                self.orbit_cam.frame_model(bounds[0], bounds[1])
 
-            print(f"Model loaded: {os.path.basename(filepath)}")
+            print(f"✓ Model loaded: {os.path.basename(filepath)} ({len(vertices)} vertices)")
             return True
 
         except Exception as e:
