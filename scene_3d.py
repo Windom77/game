@@ -251,7 +251,7 @@ class Scene3D:
 
                 if char_node:
                     # FIX: Rotate to stand upright BEFORE attaching to scene
-                    char_node.setP(-90)  # Pitch -90 to stand vertical
+                    #char_node.setP(-90)  # Pitch -90 to stand vertical
 
                     char_node.reparentTo(self.base.render)
 
@@ -259,7 +259,7 @@ class Scene3D:
                     char_node.setPos(pos[0], pos[1], 0)
 
                     # Scale larger for visibility
-                    char_node.setScale(2.5)
+                    char_node.setScale(1.5)
 
                     # Apply color tint
                     char_node.setColor(*config['color'])
