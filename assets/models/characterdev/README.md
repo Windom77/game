@@ -6,64 +6,27 @@ This folder contains customized character models created with the **Character Cu
 
 | Tool | Description | Best For |
 |------|-------------|----------|
-| `character_studio.py` | Unified editor with real-time 3D preview | Full customization workflow |
-| `character_editor.py` | Lightweight color editor | Quick edits without 3D |
+| `character_editor.py` | GUI color editor with presets | Editing material colors |
 | `model_viewer.py` | Standalone 3D viewer | Previewing/comparing models |
+| **Blender** | Full 3D editor (external) | Complex edits, best results |
 
 ---
 
-## Character Studio (Recommended)
+## Recommended Workflow
 
-The **Character Customization Studio** combines material editing with an embedded real-time 3D viewer.
+For best results, use **Blender** (free, professional):
 
-### Running the Studio
+1. **Import**: File → Import → glTF 2.0 (.glb)
+2. **Edit**: Select mesh, go to Material Properties, adjust Base Color
+3. **Export**: File → Export → glTF 2.0 (.glb)
 
-```bash
-# From the game directory
-python character_studio.py
-```
-
-### Features
-
-- **Split-screen layout**: Controls (40%) | 3D Preview (60%)
-- **Real-time updates**: Changes appear instantly in 3D view
-- **Embedded Panda3D**: No need to launch separate viewer
-- **Full control panel**: Sliders, presets, undo, save
-
-### Layout
-
-```
-+------------------------------------------+
-|  Character Customization Studio          |
-+----------------+-------------------------+
-|   Materials    |     3D Preview          |
-|   - Sliders    |                         |
-|   - Presets    |   [Real-time model]     |
-|   - Pick Color |                         |
-+----------------+-------------------------+
-|  [Reset] [Undo] [Save As] [Quick Save]  |
-+------------------------------------------+
-```
-
-### 3D Viewer Controls
-
-| Action | How To |
-|--------|--------|
-| Rotate view | Left mouse drag |
-| Pan view | Right mouse drag |
-| Zoom | Mouse scroll |
-| Reset view | Click "Reset View" |
-| Wireframe | Click "Wireframe" |
-| Grid | Click "Grid" |
-| Lighting | Click "Lighting" |
-| Auto-rotate | Click "Rotate" |
-| Screenshot | Click "Screenshot" |
+For quick color tweaks, use the built-in tools below.
 
 ---
 
-## Character Editor (Basic)
+## Character Editor
 
-For quick edits without the 3D preview overhead.
+GUI tool for editing GLB material colors.
 
 ### Running the Editor
 
