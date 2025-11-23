@@ -90,10 +90,102 @@ except ImportError:
 class MaterialInfo:
     """Information about a material in the GLB file."""
     index: int
-    name: str
+    name: str  # Original GLB name
     base_color: List[float]  # [R, G, B, A]
     original_color: List[float]
     enabled: bool = True
+    display_name: str = ""  # Friendly name for UI
+
+    def __post_init__(self):
+        if not self.display_name:
+            self.display_name = get_friendly_material_name(self.name)
+
+
+def get_friendly_material_name(material_name: str) -> str:
+    """Convert cryptic GLB material names to human-readable labels.
+
+    Examples:
+        'N00_000_00_HairBack' -> 'Hair (Back)'
+        'N00_001_03_Bottoms_' -> 'Clothing (Bottom)'
+        'Mat_Body_Skin'       -> 'Skin (Body)'
+    """
+    name_lower = material_name.lower()
+
+    # Hair detection
+    if any(word in name_lower for word in ['hair', 'bangs', 'ponytail', 'fringe']):
+        if 'back' in name_lower:
+            return "Hair (Back)"
+        elif 'front' in name_lower:
+            return "Hair (Front)"
+        elif 'bangs' in name_lower or 'fringe' in name_lower:
+            return "Hair (Bangs)"
+        elif 'ponytail' in name_lower:
+            return "Hair (Ponytail)"
+        else:
+            return "Hair"
+
+    # Body/Skin detection
+    if any(word in name_lower for word in ['body', 'skin', 'flesh']):
+        if 'face' in name_lower:
+            return "Skin (Face)"
+        else:
+            return "Skin (Body)"
+
+    # Face parts
+    if 'face' in name_lower:
+        return "Face"
+
+    # Eyes detection
+    if any(word in name_lower for word in ['eye', 'pupil', 'iris', 'sclera']):
+        if 'brow' in name_lower:
+            return "Eyebrows"
+        elif 'lash' in name_lower:
+            return "Eyelashes"
+        elif 'white' in name_lower or 'sclera' in name_lower:
+            return "Eyes (White)"
+        elif 'iris' in name_lower or 'pupil' in name_lower:
+            return "Eyes (Iris)"
+        else:
+            return "Eyes"
+
+    # Mouth/Teeth
+    if any(word in name_lower for word in ['teeth', 'tooth', 'mouth', 'tongue', 'lip']):
+        if 'teeth' in name_lower or 'tooth' in name_lower:
+            return "Teeth"
+        elif 'tongue' in name_lower:
+            return "Tongue"
+        elif 'lip' in name_lower:
+            return "Lips"
+        else:
+            return "Mouth"
+
+    # Clothing detection
+    if any(word in name_lower for word in ['top', 'shirt', 'blouse', 'jacket', 'coat', 'vest']):
+        return "Clothing (Top)"
+    if any(word in name_lower for word in ['bottom', 'pants', 'skirt', 'shorts', 'legs']):
+        return "Clothing (Bottom)"
+    if any(word in name_lower for word in ['dress', 'gown', 'robe', 'uniform']):
+        return "Clothing (Dress)"
+    if any(word in name_lower for word in ['shoe', 'boot', 'feet', 'sock', 'sandal']):
+        return "Footwear"
+
+    # Accessories
+    if any(word in name_lower for word in ['accessory', 'jewelry', 'acc', 'ring', 'necklace',
+                                            'earring', 'bracelet', 'watch', 'glasses', 'hat',
+                                            'bow', 'ribbon', 'belt', 'bag', 'glove']):
+        return "Accessories"
+
+    # Fallback: Clean up the name
+    # Remove common prefixes like N00_, numbers, underscores
+    import re
+    cleaned = re.sub(r'^[NM]\d+_\d+_\d+_', '', material_name)  # Remove N00_000_00_ style
+    cleaned = re.sub(r'^Mat_', '', cleaned)  # Remove Mat_ prefix
+    cleaned = re.sub(r'_+$', '', cleaned)  # Remove trailing underscores
+    cleaned = re.sub(r'_', ' ', cleaned)  # Replace underscores with spaces
+
+    if cleaned:
+        return cleaned.title()
+    return material_name  # Return original if all else fails
 
 
 @dataclass
@@ -497,33 +589,60 @@ class EmbeddedViewer(ShowBase):
 
     def update_material_color(self, material_name: str, color: List[float]):
         """Update a material's color in real-time."""
-        # For now, apply color to all mesh nodes (simplified approach)
-        # In a more sophisticated implementation, we'd map GLTF materials to mesh nodes
         if self.model_np:
             r, g, b = color[0], color[1], color[2]
             a = color[3] if len(color) > 3 else 1.0
+            print(f"[3D] Updating color: {material_name} -> ({r:.2f}, {g:.2f}, {b:.2f})")
 
-            # Apply to all meshes for now
             for np in self.mesh_nodes.values():
                 np.setColor(r, g, b, a)
 
     def update_all_materials(self, materials: List[MaterialInfo]):
-        """Update all material colors at once."""
+        """Update 3D preview with blended color from all enabled materials.
+
+        Since the 3D model is a combined mesh (for correct rigging), we show
+        an averaged/blended color from all enabled materials. The actual saved
+        GLB will have correct per-material colors.
+        """
         if not self.model_np:
+            print("[3D] No model loaded, skipping color update")
             return
 
-        # Apply average or first enabled material color to the whole model
-        # This is a simplified approach; full material mapping would require
-        # more complex GLTF material to mesh node mapping
-        for mat in materials:
-            if mat.enabled:
-                r, g, b = mat.base_color[0], mat.base_color[1], mat.base_color[2]
-                a = mat.base_color[3] if len(mat.base_color) > 3 else 1.0
+        # Calculate average color from all enabled materials
+        enabled_mats = [m for m in materials if m.enabled]
+        if not enabled_mats:
+            print("[3D] No enabled materials")
+            return
 
-                # Apply to all meshes
-                for np in self.mesh_nodes.values():
-                    np.setColor(r, g, b, a)
-                break  # Use first enabled material for now
+        # Weight skin/body colors more heavily for realistic preview
+        total_r, total_g, total_b = 0.0, 0.0, 0.0
+        total_weight = 0.0
+
+        for mat in enabled_mats:
+            # Skin materials get higher weight for preview
+            name_lower = mat.name.lower()
+            if any(x in name_lower for x in ['skin', 'body', 'face']):
+                weight = 3.0
+            elif any(x in name_lower for x in ['hair']):
+                weight = 2.0
+            else:
+                weight = 1.0
+
+            total_r += mat.base_color[0] * weight
+            total_g += mat.base_color[1] * weight
+            total_b += mat.base_color[2] * weight
+            total_weight += weight
+
+        # Average
+        avg_r = total_r / total_weight
+        avg_g = total_g / total_weight
+        avg_b = total_b / total_weight
+
+        print(f"[3D] Blended preview color: ({avg_r:.2f}, {avg_g:.2f}, {avg_b:.2f}) from {len(enabled_mats)} materials")
+
+        # Apply blended color to model
+        for np in self.mesh_nodes.values():
+            np.setColor(avg_r, avg_g, avg_b, 1.0)
 
     def reset_view(self):
         """Reset camera to default view."""
@@ -673,8 +792,14 @@ class CompactMaterialWidget(ttk.Frame):
             header, variable=self.enabled_var, command=self._on_enable_toggle
         ).pack(side="left")
 
-        ttk.Label(header, text=self.material.name, font=("TkDefaultFont", 9, "bold"),
-                  width=18, anchor="w").pack(side="left", padx=3)
+        # Show friendly display name (tooltip shows original name)
+        name_label = ttk.Label(header, text=self.material.display_name,
+                               font=("TkDefaultFont", 9, "bold"),
+                               width=18, anchor="w")
+        name_label.pack(side="left", padx=3)
+
+        # Tooltip showing original GLB name
+        self._create_tooltip(name_label, f"GLB Material: {self.material.name}")
 
         self.preview_canvas = tk.Canvas(header, width=30, height=20,
                                          relief="sunken", borderwidth=1)
@@ -711,12 +836,20 @@ class CompactMaterialWidget(ttk.Frame):
                 btn.pack(side="left", padx=1)
 
     def _get_relevant_presets(self) -> List[ColorPreset]:
-        """Get presets relevant to this material."""
+        """Get presets relevant to this material based on name."""
+        # Check both original name and display name for better matching
         name_lower = self.material.name.lower()
-        if any(x in name_lower for x in ["skin", "body", "face", "hand", "arm"]):
+        display_lower = self.material.display_name.lower()
+
+        # Skin presets
+        if any(x in name_lower or x in display_lower
+               for x in ["skin", "body", "face", "hand", "arm", "flesh"]):
             return SKIN_PRESETS
-        elif any(x in name_lower for x in ["hair", "head"]):
+        # Hair presets
+        elif any(x in name_lower or x in display_lower
+                 for x in ["hair", "bangs", "ponytail", "fringe"]):
             return HAIR_PRESETS
+        # Default to clothing
         return CLOTHING_PRESETS
 
     def _on_slider_change(self):
@@ -777,6 +910,33 @@ class CompactMaterialWidget(ttk.Frame):
         self.b_var.set(preset.color[2])
         self._on_slider_change()
 
+    def _create_tooltip(self, widget, text: str):
+        """Create a tooltip for a widget."""
+        def show_tooltip(event):
+            tooltip = tk.Toplevel(widget)
+            tooltip.wm_overrideredirect(True)
+            tooltip.wm_geometry(f"+{event.x_root+10}+{event.y_root+10}")
+
+            label = ttk.Label(tooltip, text=text, background="#ffffe0",
+                             relief="solid", borderwidth=1, padding=3)
+            label.pack()
+
+            def hide_tooltip():
+                tooltip.destroy()
+
+            tooltip.after(2000, hide_tooltip)
+            widget.tooltip = tooltip
+
+        def hide_tooltip(event):
+            if hasattr(widget, 'tooltip'):
+                try:
+                    widget.tooltip.destroy()
+                except Exception:
+                    pass
+
+        widget.bind('<Enter>', show_tooltip)
+        widget.bind('<Leave>', hide_tooltip)
+
 
 # ============================================================================
 # Main Application
@@ -829,7 +989,7 @@ class CharacterStudioApp:
         self._create_right_panel(right_frame)
 
     def _create_left_panel(self, parent):
-        """Create left panel with controls."""
+        """Create left panel with tabbed controls."""
         # Title
         ttk.Label(parent, text="Character Customization",
                   font=("TkDefaultFont", 14, "bold")).pack(pady=(5, 10))
@@ -849,11 +1009,24 @@ class CharacterStudioApp:
                                        foreground="gray")
         self.status_label.pack(fill="x", padx=5)
 
-        # Materials list with scrollbar
-        materials_frame = ttk.LabelFrame(parent, text="Materials", padding=5)
-        materials_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        # === TABBED NOTEBOOK ===
+        self.notebook = ttk.Notebook(parent)
+        self.notebook.pack(fill="both", expand=True, padx=5, pady=5)
 
-        # Canvas for scrolling
+        # --- Tab 1: Colors (main functionality) ---
+        colors_tab = ttk.Frame(self.notebook)
+        self.notebook.add(colors_tab, text="Colors")
+
+        # Info label about 3D preview blending
+        info_text = "Note: 3D preview shows blended color. Saved GLB has correct per-material colors."
+        info_label = ttk.Label(colors_tab, text=info_text, foreground="gray",
+                               wraplength=400, font=("TkDefaultFont", 8))
+        info_label.pack(fill="x", padx=5, pady=(5, 2))
+
+        # Materials list with scrollbar (in colors tab)
+        materials_frame = ttk.Frame(colors_tab)
+        materials_frame.pack(fill="both", expand=True, padx=2, pady=2)
+
         self.canvas = tk.Canvas(materials_frame, highlightthickness=0)
         scrollbar = ttk.Scrollbar(materials_frame, orient="vertical",
                                   command=self.canvas.yview)
@@ -875,7 +1048,39 @@ class CharacterStudioApp:
         self.canvas.bind_all("<Button-4>", self._on_mousewheel)
         self.canvas.bind_all("<Button-5>", self._on_mousewheel)
 
-        # Bottom buttons
+        # --- Tab 2: Proportions (placeholder) ---
+        proportions_tab = ttk.Frame(self.notebook)
+        self.notebook.add(proportions_tab, text="Proportions")
+
+        prop_content = ttk.Frame(proportions_tab, padding=20)
+        prop_content.pack(fill="both", expand=True)
+
+        ttk.Label(prop_content, text="Proportions",
+                  font=("TkDefaultFont", 12, "bold")).pack(pady=(0, 10))
+        ttk.Label(prop_content, text="Coming Soon:", font=("TkDefaultFont", 10)).pack()
+        ttk.Label(prop_content, text="• Scale adjustments (Head, Body, Limbs)").pack(anchor="w", padx=20)
+        ttk.Label(prop_content, text="• Height adjustment").pack(anchor="w", padx=20)
+        ttk.Label(prop_content, text="• Body type presets (Slim, Average, Stocky)").pack(anchor="w", padx=20)
+        ttk.Label(prop_content, text="\nRequires mesh deformation support.",
+                  foreground="gray").pack(pady=10)
+
+        # --- Tab 3: Pose (placeholder) ---
+        pose_tab = ttk.Frame(self.notebook)
+        self.notebook.add(pose_tab, text="Pose")
+
+        pose_content = ttk.Frame(pose_tab, padding=20)
+        pose_content.pack(fill="both", expand=True)
+
+        ttk.Label(pose_content, text="Pose",
+                  font=("TkDefaultFont", 12, "bold")).pack(pady=(0, 10))
+        ttk.Label(pose_content, text="Coming Soon:", font=("TkDefaultFont", 10)).pack()
+        ttk.Label(pose_content, text="• Pre-set poses (T-pose, A-pose, Seated)").pack(anchor="w", padx=20)
+        ttk.Label(pose_content, text="• Bone rotations").pack(anchor="w", padx=20)
+        ttk.Label(pose_content, text="• Expression presets").pack(anchor="w", padx=20)
+        ttk.Label(pose_content, text="\nRequires armature manipulation support.",
+                  foreground="gray").pack(pady=10)
+
+        # === BOTTOM BUTTONS (always visible) ===
         buttons_frame = ttk.Frame(parent)
         buttons_frame.pack(fill="x", padx=5, pady=5)
 
@@ -1062,13 +1267,18 @@ class CharacterStudioApp:
 
     def _on_material_change(self):
         """Called when any material is changed - update 3D preview."""
+        print("[UI] Material changed - updating preview...")
         self._save_undo_state()
         self._update_3d_preview()
+        self.status_label.config(text="Color updated", foreground="green")
 
     def _update_3d_preview(self):
         """Update the 3D preview with current material colors."""
         if self.viewer and self.materials:
+            print(f"[UI] Sending {len(self.materials)} materials to 3D viewer")
             self.viewer.update_all_materials(self.materials)
+        else:
+            print(f"[UI] Cannot update preview: viewer={self.viewer is not None}, materials={len(self.materials) if self.materials else 0}")
 
     def _save_undo_state(self):
         """Save current state to undo stack."""
