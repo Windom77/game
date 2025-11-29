@@ -75,19 +75,47 @@ A prototype interactive RPG game featuring an LLM-powered murder mystery set in 
 
 ## Architecture
 
+The codebase follows a modular structure for easy maintenance and extension:
+
 ```
 game/
-├── README.md           # This file
-├── requirements.txt    # Dependencies
-├── config.py          # Configuration settings
-├── main.py            # Entry point
-├── characters.py      # Character definitions & personalities
-├── llm_interface.py   # LLM provider abstraction
-├── game_engine.py     # Core game logic
-├── ui_terminal.py     # Terminal-based interface (Rich/Textual)
-├── ui_pygame.py       # Pygame graphical interface
-└── assets/
-    └── background.txt  # ASCII art background (for terminal)
+├── core/                  # Core game logic
+│   ├── __init__.py
+│   ├── engine.py          # Game engine and state management
+│   ├── characters.py      # Character definitions & personalities
+│   ├── clues.py          # Clue system and discovery
+│   └── questions.py      # Predefined questions and triggers
+├── llm/                   # LLM provider abstraction
+│   ├── __init__.py
+│   ├── base.py           # Abstract base classes
+│   ├── mock.py           # Mock provider for testing
+│   ├── ollama.py         # Ollama (local) provider
+│   ├── openai.py         # OpenAI API provider
+│   ├── groq.py           # Groq API provider
+│   └── anthropic.py      # Anthropic Claude provider
+├── ui/                    # User interface implementations
+│   ├── __init__.py
+│   ├── terminal.py       # Rich terminal UI
+│   ├── pygame_ui.py      # 2D graphical UI
+│   └── panda3d_ui.py     # 3D immersive UI
+├── graphics/              # 3D graphics and scene management
+│   ├── __init__.py
+│   ├── scene_3d.py       # Panda3D scene rendering
+│   └── camera.py         # Camera system (legacy)
+├── assets/                # Game assets
+│   ├── portraits/        # Character portraits
+│   ├── backgrounds/      # Scene backgrounds
+│   └── models/           # 3D character models
+├── interaction_test/      # Isolated interaction testing subproject
+│   ├── main.py
+│   ├── test_scene.py
+│   ├── test_character.py
+│   └── README.md
+├── config.py             # Configuration settings
+├── main.py               # Main entry point
+├── requirements.txt      # Dependencies
+├── README.md            # This file
+└── DESIGN.md            # Design documentation
 ```
 
 ## Installation

@@ -107,7 +107,7 @@ def main():
         check_dependencies()
 
     # Select LLM provider
-    from llm_interface import get_provider, detect_best_provider
+    from llm import get_provider, detect_best_provider
 
     if args.llm == "auto":
         llm_provider = detect_best_provider()
@@ -126,30 +126,30 @@ def main():
     # Launch appropriate UI
     if args.ui == "3d":
         try:
-            from ui_panda3d import run_panda3d_game
+            from ui.panda3d_ui import run_panda3d_game
             run_panda3d_game()
         except ImportError as e:
             print(f"Panda3D not available: {e}")
             print("Install with: pip install panda3d")
             print("Falling back to pygame...")
             try:
-                from ui_pygame import run_pygame_game
+                from ui.pygame_ui import run_pygame_game
                 run_pygame_game()
             except ImportError:
                 print("Pygame also not available, using terminal...")
-                from ui_terminal import run_terminal_game
+                from ui.terminal import run_terminal_game
                 run_terminal_game()
     elif args.ui == "pygame":
         try:
-            from ui_pygame import run_pygame_game
+            from ui.pygame_ui import run_pygame_game
             run_pygame_game()
         except ImportError as e:
             print(f"Pygame not available: {e}")
             print("Falling back to terminal UI...")
-            from ui_terminal import run_terminal_game
+            from ui.terminal import run_terminal_game
             run_terminal_game()
     else:
-        from ui_terminal import run_terminal_game
+        from ui.terminal import run_terminal_game
         run_terminal_game()
 
 

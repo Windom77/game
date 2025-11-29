@@ -1,7 +1,0 @@
-# Ignore generated GLB files (they're large and can be regenerated)
-*.glb
-*.gltf
-
-# Keep metadata and logs
-!README.md
-!.gitignore
